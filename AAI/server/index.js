@@ -10,8 +10,24 @@ const port = process.env.PORT || 3000;
 
 const secretStore = require('../lib/secretStore');
 
-app.use(bodyParser.json());
+// allow larger JSON bodies for base64 attachments (phones can be several MB)
+app.use(bodyParser.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, '..', 'web')));
+
+// Graceful JSON parse / payload error handling: return JSON instead of HTML
+app.use((err, req, res, next) => {
+  if (!err) return next();
+  // bodyParser too large
+  if (err.type === 'entity.too.large' || err.status === 413) {
+    return res.status(413).json({ error: 'Payload too large' });
+  }
+  // invalid JSON
+  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+    return res.status(400).json({ error: 'Invalid JSON body' });
+  }
+  // fallback to JSON error
+  return res.status(err.status || 500).json({ error: String(err) });
+});
 
 // Simple health
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
@@ -115,8 +131,31 @@ app.get('/api/solve-stream', async (req, res) => {
 app.post('/api/solve', async (req, res) => {
   const input = req.body && req.body.input;
   const preview = req.body && req.body.preview;
-  if (!input || typeof input !== 'string') {
-    return res.status(400).json({ error: 'missing input' });
+  const attachments = req.body && Array.isArray(req.body.attachments) ? req.body.attachments : [];
+
+  // debug log to help diagnose missing-input issues
+  try {
+    console.log('/api/solve called -- preview=', !!preview, 'hasInput=', typeof input === 'string' && input.trim().length > 0, 'attachments=', attachments.length);
+  } catch (e) { }
+
+  // accept either a non-empty input string OR at least one attachment
+  const hasInput = (typeof input === 'string' && input.trim().length > 0);
+  const hasAttachments = attachments.length > 0;
+  if (!hasInput && !hasAttachments) {
+    return res.status(400).json({ error: 'missing input or attachments' });
+  }
+
+  // If there are attachments but no textual input, run a simple image-analysis stub
+  // instead of selecting a text agent. This avoids returning generic text agent greetings
+  // when the user only provided images.
+  if (!hasInput && hasAttachments) {
+    try {
+      const names = attachments.map(a => a.name || 'unnamed').join(', ');
+      const out = `Received ${attachments.length} attachment(s): ${names}. Analysis: (stub) no faces detected, dominant color: yellow-ish.`;
+      return res.json({ result: out, agents: [{ name: 'attachmentStub', output: out, metadata: { attachments: attachments.length } }], durationMs: 0, scored: [], rationale: 'Ran attachment analysis (stub) because no text input provided' });
+    } catch (e) {
+      return res.status(500).json({ error: String(e) });
+    }
   }
 
   const start = Date.now();
@@ -132,9 +171,9 @@ app.post('/api/solve', async (req, res) => {
   const suitableAll = scored.filter(s => s.score >= 0.6).sort((a,b) => b.score - a.score);
   const suitable = suitableAll.length ? [suitableAll[0]] : [];
 
-  // If client asked for preview, return scoring and rationale without running agents
-  if (preview) {
-    return res.json({ scored, suitable: suitable.map(s => ({ name: s.name, score: s.score })), rationale: suitable.length ? `Selected ${suitable[0].name} with score ${suitable[0].score}` : 'No candidate reached threshold' });
+    // If client asked for preview, return scoring and rationale without running agents
+    if (preview) {
+    return res.json({ scored, suitable: suitable.map(s => ({ name: s.name, score: s.score })), rationale: suitable.length ? `Selected ${suitable[0].name} with score ${suitable[0].score}` : 'No candidate reached threshold', attachments: attachments.length });
   }
 
   if (suitable.length === 0) {
@@ -146,8 +185,8 @@ app.post('/api/solve', async (req, res) => {
         if (needs.length === 0) needs.push('internet-access');
         return needs;
       };
-      const needs = infer(input);
-  return res.json({ result: null, agents: [], message: 'No suitable agent found for this query', needs, scored });
+      const needs = infer(input || (hasAttachments ? 'attachment' : ''));
+  return res.json({ result: null, agents: [], message: 'No suitable agent found for this query', needs, scored, attachments: attachments.length });
     }
 
   const runners = suitable.map(s => ({ name: s.name, fn: s.mod.run }));
