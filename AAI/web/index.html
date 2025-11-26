@@ -1,0 +1,58 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>AAI Demo</title>
+    <style>
+      :root{
+        --bg:#0b1020;--panel:#0f1724;--muted:#9aa4b2;--accent:#7c5cff;--success:#26d07b;--warn:#ffb020;--danger:#ff6b6b;--card:#0f1726
+      }
+      html,body{height:100%;background:var(--bg);color:#e6eef8;margin:0;font-family:Inter,ui-sans-serif,system-ui,Arial}
+      .container{padding:24px;max-width:1100px;margin:0 auto}
+      h1{margin:0 0 12px 0;color:var(--accent);letter-spacing:2px}
+      textarea{width:100%;height:6rem;background:#071025;border:1px solid #122032;color:#e6eef8;padding:8px;border-radius:6px}
+      input,button,textarea{font-family:inherit}
+      button{background:var(--accent);color:white;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;margin-right:8px}
+      .card{background:var(--panel);border:1px solid rgba(255,255,255,0.03);padding:12px;border-radius:8px}
+      #result{background:linear-gradient(180deg,#0b1526, #07101a);border:1px solid rgba(255,255,255,0.03);padding:16px;border-radius:8px;min-height:140px}
+      #needsPrompt .box{border:1px dashed rgba(255,255,255,0.06);padding:10px;border-radius:6px;background:#07131f}
+      #selectionPanel{padding:8px;background:transparent;white-space:pre-wrap}
+      .score-row{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+      .score-name{min-width:120px;color:var(--muted);font-size:13px}
+      .score-bar-wrap{flex:1;background:rgba(255,255,255,0.03);height:12px;border-radius:6px;overflow:hidden}
+      .score-bar{height:100%;background:var(--accent);width:0%;transition:width .25s}
+      .badge{padding:4px 8px;border-radius:999px;font-size:12px;color:#07101a;background:var(--muted);margin-left:8px}
+    </style>
+  </head>
+  <body>
+    <h1>J A R V I I S</h1>
+
+    <section style="margin-top:1rem;display:flex;gap:1rem;align-items:flex-start">
+      <div style="flex:1;max-width:50%">
+        <h2>Question</h2>
+        <form id="form">
+          <label for="input" style="display:block;margin-bottom:.25rem">Question</label>
+          <textarea id="input" placeholder="Type your query...">What is a banana?</textarea>
+          <div style="margin-top:.5rem">
+            <button type="submit">Go!</button>
+          </div>
+        </form>
+      </div>
+
+      <div style="flex:1;max-width:50%">
+        <h2>Combined result</h2>
+  <div id="result" style="padding:1rem;white-space:pre-wrap">(no result yet)</div>
+      </div>
+    </section>
+
+  <!-- Agents sidebar removed; agent outputs now appear in the Combined result -->
+
+  <div class="container">
+    <div id="needsPrompt" style="margin-top:1rem"></div>
+    <div id="selectionPanel" style="margin-top:1rem;font-size:0.9rem;color:#fff"></div>
+  </div>
+
+    <script src="/main.js"></script>
+  </body>
+</html>
