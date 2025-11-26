@@ -9,6 +9,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const removeAllBtn = document.getElementById('removeAllBtn');
   const attachIndicator = document.getElementById('attachIndicator');
 
+  const MAX_ATTACHMENTS = 5;
+  const MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024; // ~3MB each to stay under server limit
+  const MAX_B64_LENGTH = Math.ceil(MAX_ATTACHMENT_BYTES * 4 / 3);
   const attachments = [];
 
   function setResultText(text){
@@ -55,12 +58,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function handleImageFile(file){
     return new Promise((res, rej) => {
+      if (attachments.length >= MAX_ATTACHMENTS) {
+        alert(`Too many attachments. Limit ${MAX_ATTACHMENTS}.`);
+        return res();
+      }
       try{
         const reader = new FileReader();
         reader.onload = () => {
           const dataUrl = reader.result || '';
           const parts = dataUrl.split(',');
           const b64 = parts[1] || '';
+          if (b64.length > MAX_B64_LENGTH) {
+            alert(`Attachment "${file.name || 'image'}" is too large (max ~3MB).`);
+            return res();
+          }
           const type = file.type || 'image/png';
           const ext = (type.split('/')[1]||'png').replace(/[^a-z0-9]/g,'');
           const name = file.name || `pasted-${Date.now()}.${ext}`;
@@ -133,6 +144,22 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
+      // If there are attachments alongside text, run via POST so attachments are included
+      if (attachments.length) {
+        setResultText('Running agents with attachments...');
+        try {
+          const runPayload = { input: input.value || '', preview: false, attachments };
+          const runResp = await fetch('/api/solve', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(runPayload) });
+          const runBody = await runResp.json();
+          if (!runResp.ok) throw new Error(runBody.error || JSON.stringify(runBody));
+          if (runBody.result) setResultText(runBody.result);
+          if (runBody.scored) showScoredResponse(runBody);
+        } catch (err) {
+          setResultText('Error: '+String(err));
+        }
+        return;
+      }
+
       setResultText('Opening live stream for selected agent...');
       const esUrl = `/api/solve-stream?input=${encodeURIComponent(input.value)}`;
       const es = new EventSource(esUrl);
@@ -149,4 +176,3 @@ document.addEventListener('DOMContentLoaded', () => {
   // initial
   renderPastePreview();
 });
-

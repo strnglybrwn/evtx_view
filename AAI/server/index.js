@@ -4,11 +4,15 @@ const path = require('path');
 
 const exampleAgent = require('../agents/exampleAgent');
 const duckAgent = require('../agents/duckduckgoAgent');
+const openaiAgent = require('../agents/openaiAgent');
 
 const app = express();
 const port = process.env.PORT || 3000;
 
 const secretStore = require('../lib/secretStore');
+const MAX_ATTACHMENTS = 5;
+const MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024;
+const MAX_B64_LENGTH = Math.ceil(MAX_ATTACHMENT_BYTES * 4 / 3);
 
 // allow larger JSON bodies for base64 attachments (phones can be several MB)
 app.use(bodyParser.json({ limit: '10mb' }));
@@ -52,9 +56,9 @@ app.get('/api/solve-stream', async (req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders && res.flushHeaders();
+  const streamStart = Date.now();
 
   // enumerate available agents and their metadata
-  const openaiAgent = require('../agents/openaiAgent');
   const registered = [
     { name: 'openaiAgent', mod: openaiAgent },
     { name: 'exampleAgent', mod: exampleAgent },
@@ -112,12 +116,12 @@ app.get('/api/solve-stream', async (req, res) => {
   // When all agents finish send final event and close stream
   Promise.all(promises).then(results => {
     const final = results.map(r => r.output || (`[${r.name} error] ${r.error || 'no output'}`)).join('\n\n');
-    sendEvent(res, 'final', { result: final, agents: results, durationMs: Date.now() });
+    sendEvent(res, 'final', { result: final, agents: results, durationMs: Date.now() - streamStart });
     // indicate done then end
     sendEvent(res, 'done', {});
     setTimeout(() => res.end(), 100);
   }).catch(err => {
-    sendEvent(res, 'error', { error: String(err) });
+    sendEvent(res, 'error', { error: String(err), durationMs: Date.now() - streamStart });
     setTimeout(() => res.end(), 100);
   });
 
@@ -132,6 +136,13 @@ app.post('/api/solve', async (req, res) => {
   const input = req.body && req.body.input;
   const preview = req.body && req.body.preview;
   const attachments = req.body && Array.isArray(req.body.attachments) ? req.body.attachments : [];
+  if (attachments.length > MAX_ATTACHMENTS) {
+    return res.status(400).json({ error: `too many attachments (max ${MAX_ATTACHMENTS})` });
+  }
+  const invalidAttachment = attachments.find(a => !a || typeof a.data !== 'string' || a.data.length > MAX_B64_LENGTH);
+  if (invalidAttachment) {
+    return res.status(400).json({ error: `attachment too large (max ~${Math.round(MAX_ATTACHMENT_BYTES/1024/1024)}MB each)` });
+  }
 
   // debug log to help diagnose missing-input issues
   try {
@@ -161,7 +172,6 @@ app.post('/api/solve', async (req, res) => {
   const start = Date.now();
   try {
     // enumerate and score agents
-    const openaiAgent = require('../agents/openaiAgent');
     const registered = [
       { name: 'openaiAgent', mod: openaiAgent },
       { name: 'exampleAgent', mod: exampleAgent },
@@ -214,6 +224,13 @@ app.post('/api/provide', async (req, res) => {
 
   // Simple check: if attachments provided and need includes image-analysis, run a fake image agent
   const provided = { attachments: attachments || [], apiKey };
+  if (provided.attachments.length > MAX_ATTACHMENTS) {
+    return res.status(400).json({ error: `too many attachments (max ${MAX_ATTACHMENTS})` });
+  }
+  const invalidAttachment = provided.attachments.find(a => !a || typeof a.data !== 'string' || a.data.length > MAX_B64_LENGTH);
+  if (invalidAttachment) {
+    return res.status(400).json({ error: `attachment too large (max ~${Math.round(MAX_ATTACHMENT_BYTES/1024/1024)}MB each)` });
+  }
 
   // For this prototype, if attachments exist and needs includes image-analysis, pretend we have an image agent
   if (needs && needs.includes('image-analysis') && provided.attachments.length > 0) {
@@ -226,11 +243,15 @@ app.post('/api/provide', async (req, res) => {
   if (needs && needs.includes('internet-access') && apiKey) {
     // In this minimal prototype we don't actually use the key, but will re-run the normal selection
   // persist the provided key in the transient secret store under a well-known key
-  try { secretStore.set('external_api_key', apiKey); } catch (e) {}
+  try {
+    secretStore.set('external_api_key', apiKey);
+    console.warn('Persisting provided apiKey to .env.local (plaintext) for development only.');
+  } catch (e) {}
     // Reuse POST /api/solve logic
     try {
       // enumerate and score agents
       const registered = [
+        { name: 'openaiAgent', mod: openaiAgent },
         { name: 'exampleAgent', mod: exampleAgent },
         { name: 'duckduckgoAgent', mod: duckAgent }
       ];

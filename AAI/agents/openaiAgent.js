@@ -2,6 +2,13 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
+const REQUEST_TIMEOUT_MS = 10000;
+const RETRY_DELAY_MS = 300;
+
+function delay(ms) {
+  return new Promise(res => setTimeout(res, ms));
+}
+
 function readEnvFile() {
   try {
     const p = path.join(__dirname, '..', '.env');
@@ -58,7 +65,7 @@ async function run(input) {
     }
   };
 
-  return new Promise((resolve, reject) => {
+  const sendRequest = () => new Promise((resolve, reject) => {
     const req = https.request(options, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
@@ -72,9 +79,22 @@ async function run(input) {
       });
     });
     req.on('error', reject);
+    req.setTimeout(REQUEST_TIMEOUT_MS, () => req.destroy(new Error('openai request timeout')));
     req.write(payload);
     req.end();
   });
+
+  try {
+    return await sendRequest();
+  } catch (err) {
+    // simple single retry on timeout/transient network errors
+    const msg = String(err || '').toLowerCase();
+    if (msg.includes('timeout') || msg.includes('ecconnreset') || msg.includes('econnreset')) {
+      await delay(RETRY_DELAY_MS);
+      return await sendRequest();
+    }
+    throw err;
+  }
 }
 
 function supports(input) {

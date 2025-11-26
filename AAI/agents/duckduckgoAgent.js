@@ -1,9 +1,16 @@
 const https = require('https');
 
+const REQUEST_TIMEOUT_MS = 8000;
+const RETRY_DELAY_MS = 300;
+
+function delay(ms) {
+  return new Promise(res => setTimeout(res, ms));
+}
+
 function fetchInstantAnswer(q) {
   const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(q)}&format=json&no_redirect=1&no_html=1`;
   return new Promise((resolve, reject) => {
-    https.get(url, (res) => {
+    const req = https.get(url, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
@@ -14,13 +21,22 @@ function fetchInstantAnswer(q) {
           reject(err);
         }
       });
-    }).on('error', reject);
+    });
+    req.on('error', reject);
+    req.setTimeout(REQUEST_TIMEOUT_MS, () => req.destroy(new Error('duckduckgo request timeout')));
   });
 }
 
 async function run(input) {
   // Call DuckDuckGo Instant Answer API and return a short text summary
-  const json = await fetchInstantAnswer(input);
+  let json;
+  try {
+    json = await fetchInstantAnswer(input);
+  } catch (err) {
+    // retry once for transient failures
+    await delay(RETRY_DELAY_MS);
+    json = await fetchInstantAnswer(input);
+  }
   // Prefer AbstractText, then RelatedTopics first text, then Answer
   let output = '';
   if (json.AbstractText) output = json.AbstractText;
