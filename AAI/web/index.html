@@ -26,31 +26,50 @@
     </style>
   </head>
   <body>
-    <h1>J A R V I I S</h1>
+    <h1>J A A R V I S</h1>
 
-    <section style="margin-top:1rem;display:flex;gap:1rem;align-items:flex-start">
-      <div style="flex:1;max-width:50%">
+    <section id="topRow" style="margin-top:1rem">
+      <div id="col-question" class="col-left">
         <h2>Question</h2>
         <form id="form">
           <label for="input" style="display:block;margin-bottom:.25rem">Question</label>
-          <textarea id="input" placeholder="Type your query...">What is a banana?</textarea>
+          <textarea id="input" placeholder="Type your query, paste an image...">Who was ada lovelace</textarea>
           <div style="margin-top:.5rem">
             <button type="submit">Go!</button>
           </div>
+            <div id="pastePreview" aria-live="polite" style="margin-top:.5rem;display:flex;gap:8px;flex-wrap:wrap"></div>
+            <div id="attachControls" style="margin-top:.5rem;display:flex;gap:8px;align-items:center">
+              <button id="removeAllBtn" type="button" style="display:none;background:#2b2f42;color:#fff;padding:6px 8px;border-radius:6px;border:none;">Remove all</button>
+              <span id="attachIndicator" style="display:none;color:var(--accent);font-size:13px">Attachments will be sent</span>
+            </div>
         </form>
       </div>
 
-      <div style="flex:1;max-width:50%">
+      <div id="col-result" class="col-center">
         <h2>Combined result</h2>
-  <div id="result" style="padding:1rem;white-space:pre-wrap">(no result yet)</div>
+        <div id="result" style="padding:1rem;white-space:pre-wrap">(no result yet)</div>
       </div>
+
+      <aside id="col-scores" class="col-right">
+        <h2>Agent suitability</h2>
+        <div id="selectionPanel" class="card" style="margin-top:6px;padding:8px"></div>
+      </aside>
     </section>
+    <style>
+      /* grid layout for top row: 39% / 39% / 20% */
+      #topRow{display:grid;grid-template-columns:39% 39% 20%;gap:1rem;align-items:start}
+      .col-left,.col-center{min-width:200px}
+      .col-right{min-width:160px}
+      @media (max-width:900px){
+        #topRow{grid-template-columns:1fr;}
+        .col-right{order:3}
+      }
+    </style>
 
   <!-- Agents sidebar removed; agent outputs now appear in the Combined result -->
 
   <div class="container">
     <div id="needsPrompt" style="margin-top:1rem"></div>
-    <div id="selectionPanel" style="margin-top:1rem;font-size:0.9rem;color:#fff"></div>
   </div>
 
     <script src="/main.js"></script>

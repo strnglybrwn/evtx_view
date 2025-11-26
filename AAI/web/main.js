@@ -1,19 +1,69 @@
 const form = document.getElementById('form');
 const input = document.getElementById('input');
 const result = document.getElementById('result');
-const liveBtn = document.getElementById('liveBtn');
 // agentsContainer removed; combined result will include agent outputs
 const needsPrompt = document.getElementById('needsPrompt');
 const selectionPanel = document.getElementById('selectionPanel');
+const pastePreview = document.getElementById('pastePreview');
+
+// attachments captured from paste (array of {name,type,data})
+const attachments = [];
+
+// capture pasted images from the textarea
+input.addEventListener('paste', async (ev) => {
+  try {
+    const items = ev.clipboardData && ev.clipboardData.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (it && it.type && it.type.indexOf('image') === 0) {
+        const blob = it.getAsFile();
+        const buf = await blob.arrayBuffer();
+        const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+        const ext = (it.type.split('/')[1] || 'png').replace(/[^a-z0-9]/g, '')
+        const name = `pasted-${Date.now()}.${ext}`;
+        attachments.push({ name, type: it.type, data: b64 });
+      }
+    }
+    renderPastePreview();
+  } catch (err) {
+    console.warn('paste handling failed', err);
+  }
+});
+
+function renderPastePreview(){
+  if (!pastePreview) return;
+  pastePreview.innerHTML = '';
+  attachments.forEach((att, idx) => {
+    const w = document.createElement('div'); w.style.position='relative';
+    const img = document.createElement('img'); img.src = `data:${att.type};base64,${att.data}`;
+    img.style.maxWidth='120px'; img.style.maxHeight='90px'; img.style.borderRadius='6px';
+    const btn = document.createElement('button'); btn.textContent='✕';
+    btn.style.position='absolute'; btn.style.top='-6px'; btn.style.right='-6px'; btn.style.padding='3px 6px';
+    btn.onclick = () => { attachments.splice(idx,1); renderPastePreview(); };
+    w.appendChild(img); w.appendChild(btn); pastePreview.appendChild(w);
+  });
+  // update controls
+  const removeAllBtn = document.getElementById('removeAllBtn');
+  const attachIndicator = document.getElementById('attachIndicator');
+  if (removeAllBtn) removeAllBtn.style.display = attachments.length ? 'inline-block' : 'none';
+  if (attachIndicator) attachIndicator.style.display = attachments.length ? 'inline' : 'none';
+}
+
+// remove all attachments
+const removeAllBtnEl = document.getElementById('removeAllBtn');
+if (removeAllBtnEl) removeAllBtnEl.addEventListener('click', () => { attachments.splice(0, attachments.length); renderPastePreview(); });
 
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
   setResult('Loading...');
   try {
+    const payload = { input: input.value };
+    if (attachments.length) payload.attachments = attachments;
     const resp = await fetch('/api/solve', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ input: input.value })
+      body: JSON.stringify(payload)
     });
     const body = await resp.json();
     if (!resp.ok) throw new Error(body.error || JSON.stringify(body));
