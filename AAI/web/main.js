@@ -10,25 +10,49 @@ const pastePreview = document.getElementById('pastePreview');
 const attachments = [];
 
 // capture pasted images from the textarea
+async function handleImageFile(file){
+  try{
+    const buf = await file.arrayBuffer();
+    const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+    const ext = (file.type.split('/')[1] || 'png').replace(/[^a-z0-9]/g, '');
+    const name = `pasted-${Date.now()}.${ext}`;
+    attachments.push({ name, type: file.type || 'image/png', data: b64 });
+    renderPastePreview();
+  }catch(e){ console.warn('file->b64 failed', e); }
+}
+
 input.addEventListener('paste', async (ev) => {
   try {
     const items = ev.clipboardData && ev.clipboardData.items;
-    if (!items) return;
-    for (let i = 0; i < items.length; i++) {
-      const it = items[i];
-      if (it && it.type && it.type.indexOf('image') === 0) {
-        const blob = it.getAsFile();
-        const buf = await blob.arrayBuffer();
-        const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
-        const ext = (it.type.split('/')[1] || 'png').replace(/[^a-z0-9]/g, '')
-        const name = `pasted-${Date.now()}.${ext}`;
-        attachments.push({ name, type: it.type, data: b64 });
+    if (items) {
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        if (!it) continue;
+        if (it.kind === 'file') {
+          const f = it.getAsFile();
+          if (f && f.type && f.type.indexOf('image') === 0) await handleImageFile(f);
+        } else if (it.type && it.type.indexOf('image') === 0) {
+          const blob = it.getAsFile(); if (blob) await handleImageFile(blob);
+        }
       }
+    } else if (ev.clipboardData && ev.clipboardData.files && ev.clipboardData.files.length) {
+      for (let f of ev.clipboardData.files) if (f.type && f.type.indexOf('image')===0) await handleImageFile(f);
     }
-    renderPastePreview();
   } catch (err) {
     console.warn('paste handling failed', err);
   }
+});
+
+// drag & drop support on the textarea
+input.addEventListener('dragover', (e)=>{ e.preventDefault(); input.classList.add('dragover'); });
+input.addEventListener('dragleave', (e)=>{ e.preventDefault(); input.classList.remove('dragover'); });
+input.addEventListener('drop', async (e)=>{
+  e.preventDefault(); input.classList.remove('dragover');
+  try{
+    const files = e.dataTransfer && e.dataTransfer.files;
+    if (!files) return;
+    for (let i=0;i<files.length;i++){ const f = files[i]; if (f.type && f.type.indexOf('image')===0) await handleImageFile(f); }
+  }catch(err){ console.warn('drop failed', err); }
 });
 
 function renderPastePreview(){
@@ -56,22 +80,36 @@ if (removeAllBtnEl) removeAllBtnEl.addEventListener('click', () => { attachments
 
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
-  setResult('Loading...');
+  // Step 1: request a preview (scoring only)
+  setResult('Analyzing suitability...');
   try {
-    const payload = { input: input.value };
-    if (attachments.length) payload.attachments = attachments;
-    const resp = await fetch('/api/solve', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+    const previewPayload = { input: input.value, preview: true };
+    if (attachments.length) previewPayload.attachments = attachments;
+    const previewResp = await fetch('/api/solve', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(previewPayload) });
+    const previewBody = await previewResp.json();
+    if (!previewResp.ok) throw new Error(previewBody.error || JSON.stringify(previewBody));
+    // show suitability UI
+    showScoredResponse(previewBody);
+    // now open an SSE connection for the selected agent's live progress
+    setResult('Opening live stream for selected agent...');
+    // add enter animation to selection panel
+    selectionPanel.classList.add('fade-enter');
+    setTimeout(() => selectionPanel.classList.add('fade-enter-active'), 20);
+    // open EventSource to stream events (server emits agent-score, selection, agent-start, agent-done, final)
+    const esUrl = `/api/solve-stream?input=${encodeURIComponent(input.value)}`;
+    const es = new EventSource(esUrl);
+    es.addEventListener('agent-score', (ev) => {
+      // optional: update selection UI if needed
+      try { const d = JSON.parse(ev.data); showSelectionScores([{ name: d.name, score: d.score }]); } catch (e) {}
     });
-    const body = await resp.json();
-    if (!resp.ok) throw new Error(body.error || JSON.stringify(body));
-    // show scoring info
-    showScoredResponse(body);
-    // append agent outputs into the combined result in a readable way
-    const combined = (body.result) ? body.result : (body.agents || []).map(a => a.output || '').join('\n\n');
-    setResult(combined);
+    es.addEventListener('selection', (ev) => {
+      try { const d = JSON.parse(ev.data); showScoredResponse({ scored: d.selected, rationale: d.rationale || d.message }); } catch (e) {}
+    });
+    es.addEventListener('agent-start', (ev) => { try { const d = JSON.parse(ev.data); setResult((prev) => prev + `\n\n[${d.name}] started...`); } catch (e) {} });
+    es.addEventListener('agent-done', (ev) => { try { const d = JSON.parse(ev.data); setResult((prev) => (prev || '') + `\n\n[${d.name}] ${d.output || ''}`); } catch (e) {} });
+    es.addEventListener('agent-error', (ev) => { try { const d = JSON.parse(ev.data); setResult((prev) => (prev || '') + `\n\n[${d.name} error] ${d.error || ''}`); } catch (e) {} });
+    es.addEventListener('final', (ev) => { try { const d = JSON.parse(ev.data); if (d && d.result) setResult(d.result); } catch (e) {} });
+    es.addEventListener('done', () => { try { es.close(); selectionPanel.classList.remove('fade-enter','fade-enter-active'); } catch (e) {} });
   } catch (err) {
     setResult('Error: ' + String(err));
   }

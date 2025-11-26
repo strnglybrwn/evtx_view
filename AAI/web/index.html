@@ -12,6 +12,7 @@
       .container{padding:24px;max-width:1100px;margin:0 auto}
       h1{margin:0 0 12px 0;color:var(--accent);letter-spacing:2px}
       textarea{width:100%;height:6rem;background:#071025;border:1px solid #122032;color:#e6eef8;padding:8px;border-radius:6px}
+  textarea.paste-area.dragover{outline:2px dashed var(--accent);box-shadow:0 2px 8px rgba(124,92,255,0.08)}
       input,button,textarea{font-family:inherit}
       button{background:var(--accent);color:white;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;margin-right:8px}
       .card{background:var(--panel);border:1px solid rgba(255,255,255,0.03);padding:12px;border-radius:8px}
@@ -23,6 +24,12 @@
       .score-bar-wrap{flex:1;background:rgba(255,255,255,0.03);height:12px;border-radius:6px;overflow:hidden}
       .score-bar{height:100%;background:var(--accent);width:0%;transition:width .25s}
       .badge{padding:4px 8px;border-radius:999px;font-size:12px;color:#07101a;background:var(--muted);margin-left:8px}
+  /* simple transitions between suitability and results */
+  .fade-enter{opacity:0;transform:translateY(6px);transition:opacity .28s ease,transform .28s ease}
+  .fade-enter.fade-enter-active{opacity:1;transform:none}
+  .fade-exit{opacity:1;transform:none;transition:opacity .22s ease,transform .22s ease}
+  .fade-exit.fade-exit-active{opacity:0;transform:translateY(-6px)}
+  #result.loading{opacity:0.85;filter:blur(0.4px);}
     </style>
   </head>
   <body>
@@ -33,7 +40,8 @@
         <h2>Question</h2>
         <form id="form">
           <label for="input" style="display:block;margin-bottom:.25rem">Question</label>
-          <textarea id="input" placeholder="Type your query, paste an image...">Who was ada lovelace</textarea>
+          <textarea id="input" class="paste-area" placeholder="Type your query, paste an image...">Who was ada lovelace</textarea>
+          <div style="margin-top:.25rem;color:var(--muted);font-size:13px">Tip: you can paste or drop an image into the question box to attach it.</div>
           <div style="margin-top:.5rem">
             <button type="submit">Go!</button>
           </div>

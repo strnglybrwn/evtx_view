@@ -114,6 +114,7 @@ app.get('/api/solve-stream', async (req, res) => {
 // Main API: orchestrator that calls agents
 app.post('/api/solve', async (req, res) => {
   const input = req.body && req.body.input;
+  const preview = req.body && req.body.preview;
   if (!input || typeof input !== 'string') {
     return res.status(400).json({ error: 'missing input' });
   }
@@ -127,9 +128,14 @@ app.post('/api/solve', async (req, res) => {
       { name: 'exampleAgent', mod: exampleAgent },
       { name: 'duckduckgoAgent', mod: duckAgent }
     ];
-  const scored = registered.map(r => ({ name: r.name, score: (typeof r.mod.supports === 'function') ? r.mod.supports(input) : 0, mod: r.mod }));
+    const scored = registered.map(r => ({ name: r.name, score: (typeof r.mod.supports === 'function') ? r.mod.supports(input) : 0, mod: r.mod }));
   const suitableAll = scored.filter(s => s.score >= 0.6).sort((a,b) => b.score - a.score);
   const suitable = suitableAll.length ? [suitableAll[0]] : [];
+
+  // If client asked for preview, return scoring and rationale without running agents
+  if (preview) {
+    return res.json({ scored, suitable: suitable.map(s => ({ name: s.name, score: s.score })), rationale: suitable.length ? `Selected ${suitable[0].name} with score ${suitable[0].score}` : 'No candidate reached threshold' });
+  }
 
   if (suitable.length === 0) {
       const infer = (q) => {
