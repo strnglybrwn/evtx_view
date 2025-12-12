@@ -83,6 +83,8 @@ app.get('/health', (req, res) => res.json({ status: 'ok' }));
 // Server-Sent Events endpoint: streams agent activity live
 function sendEvent(res, event, data) {
   try {
+    // Log SSE traffic for debugging (avoid echoing secrets)
+    try { logger.debug('SSE event', { event, data }); } catch (e) { /* ignore logging errors */ }
     res.write(`event: ${event}\n`);
     res.write(`data: ${typeof data === 'string' ? data : JSON.stringify(data)}\n\n`);
   } catch (err) {
