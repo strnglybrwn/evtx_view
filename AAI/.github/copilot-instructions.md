@@ -72,6 +72,16 @@ SSE stream emitting: agent-score, agent-start, agent-done, agent-error, selectio
 Each event is JSON in data field. UI opens stream on "Run with live updates" button click.
 ```
 
+**POST /api/provide**
+```
+Request: { input: "string", attachments?: [{name, type, data: base64}], apiKey?: "string", needs?: ["capability"] }
+Response: { ran: boolean, result?: "...", agents?: [...], message?: "..." }
+- Called when user provides missing resources (e.g., API key) after initial selection failed
+- If needs includes "internet-access" + apiKey provided, re-runs agent selection with key stored in secretStore
+- If needs includes "image-analysis" + attachments, runs stub image analysis
+- Returns { ran: true, result: "..." } on success, { ran: false, message: "..." } otherwise
+```
+
 ## Developer workflows
 
 - **Add new agent:** Create `agents/myAgent.js` with `run()`, `supports()`, `requirements`. Register in server's `registered` array (lines ~130, ~210, ~280).

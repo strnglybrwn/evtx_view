@@ -6,13 +6,82 @@ Quick start (local development)
 
 Requirements: Node.js 16+ recommended.
 
+**Option 1: Using startup script (recommended)**
+```bash
+# from repo root
+./startup.sh start       # macOS/Linux
+# or
+startup.bat start        # Windows
+# then open http://localhost:3000 in your browser
+```
+
+**Option 2: Manual setup**
 ```bash
 # from repo root
 npm install
 # start server (serves web/ as static files)
-node AAI/server/index.js
+npm run dev
 # open http://localhost:3000 in your browser
 ```
+
+## Startup script usage
+
+The `startup.sh` (macOS/Linux) and `startup.bat` (Windows) scripts automate server management. Use from the project root:
+
+### Commands
+
+| Command | Effect |
+|---------|--------|
+| `start` | Install npm dependencies and launch the server at http://localhost:3000 |
+| `stop` | Gracefully stop the running server |
+| `restart` | Stop and restart the server (useful after code changes) |
+| `status` | Check if the server is running and show the port |
+
+### macOS/Linux examples
+
+```bash
+# Start the server (installs deps automatically)
+./startup.sh start
+
+# Check if running
+./startup.sh status
+
+# Restart after making changes
+./startup.sh restart
+
+# Stop the server
+./startup.sh stop
+```
+
+### Windows examples
+
+```cmd
+REM Start the server
+startup.bat start
+
+REM Check if running
+startup.bat status
+
+REM Restart after making changes
+startup.bat restart
+
+REM Stop the server
+startup.bat stop
+```
+
+### Logs and troubleshooting
+
+- **Server logs:** The script logs output to `server.log` (Unix) or opens a dedicated window (Windows)
+- **View logs (Unix):** `tail -f server.log`
+- **PID tracking:** The script stores the process ID in `.aai.pid` (for Unix cleanup)
+- **Port conflict:** If port 3000 is in use, modify `startup.sh` or set `PORT=<number> npm run dev`
+
+### How it works
+
+- **start:** Checks if a server is already running, installs dependencies via `npm install`, then launches `npm run dev` in the background
+- **stop:** Finds and terminates the running server process, cleaning up the PID file
+- **restart:** Stops gracefully, waits 1 second, then starts fresh (ensures clean state)
+- **status:** Checks the PID file and verifies the process is still alive
 
 - Project structure
 - `web/` — static frontend: `index.html`, `main.js`. Handles paste/drop, preview thumbnails, and the preview → run flow.
