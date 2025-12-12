@@ -19,6 +19,10 @@ document.addEventListener('DOMContentLoaded', () => {
     try{
       if (typeof text === 'function') result.textContent = text(result.textContent || '');
       else result.textContent = text || '';
+      // Ensure result div is always visible (fixes rendering issue)
+      result.style.display = 'block';
+      result.style.opacity = '1';
+      result.style.visibility = 'visible';
     }catch(e){ console.warn(e); }
   }
 
@@ -163,12 +167,25 @@ document.addEventListener('DOMContentLoaded', () => {
       setResultText('Opening live stream for selected agent...');
       const esUrl = `/api/solve-stream?input=${encodeURIComponent(input.value)}`;
       const es = new EventSource(esUrl);
-      es.addEventListener('selection',(ev)=>{ try{ const d=JSON.parse(ev.data); showScoredResponse({ selected: d.selected || [], rationale: d.rationale || d.message }); }catch(e){} });
-      es.addEventListener('agent-start',(ev)=>{ try{ const d=JSON.parse(ev.data); setResultText(prev=> (prev?prev+'\n\n':'')+`[${d.name}] started...`); }catch(e){} });
-      es.addEventListener('agent-done',(ev)=>{ try{ const d=JSON.parse(ev.data); setResultText(prev=> (prev?prev+'\n\n':'')+`[${d.name}] ${d.output||''}`); }catch(e){} });
-      es.addEventListener('agent-error',(ev)=>{ try{ const d=JSON.parse(ev.data); setResultText(prev=> (prev?prev+'\n\n':'')+`[${d.name} error] ${d.error||''}`); }catch(e){} });
-      es.addEventListener('final',(ev)=>{ try{ const d=JSON.parse(ev.data); if (d && d.result) setResultText(d.result); }catch(e){} });
-      es.addEventListener('done',()=>{ try{ es.close(); }catch(e){} });
+      es.addEventListener('selection',(ev)=>{
+        try{
+          const d=JSON.parse(ev.data);
+          showScoredResponse({ selected: d.selected || [], rationale: d.rationale || d.message });
+        }catch(e){ console.error('selection parse', e); }
+      });
+      es.addEventListener('agent-start',(ev)=>{
+        try{ const d=JSON.parse(ev.data); setResultText(prev=> (prev?prev+'\n\n':'')+`[${d.name}] started...`); }catch(e){ console.error('agent-start parse', e); }
+      });
+      es.addEventListener('agent-done',(ev)=>{
+        try{ const d=JSON.parse(ev.data); setResultText(prev=> (prev?prev+'\n\n':'')+`[${d.name}] ${d.output||''}`); }catch(e){ console.error('agent-done parse', e); }
+      });
+      es.addEventListener('agent-error',(ev)=>{
+        try{ const d=JSON.parse(ev.data); setResultText(prev=> (prev?prev+'\n\n':'')+`[${d.name} error] ${d.error||''}`); }catch(e){ console.error('agent-error parse', e); }
+      });
+      es.addEventListener('final',(ev)=>{
+        try{ const d=JSON.parse(ev.data); if (d && d.result) setResultText(d.result); }catch(e){ console.error('final parse', e); }
+      });
+      es.addEventListener('done',()=>{ try{ es.close(); }catch(e){ console.error('done close', e); } });
 
     }catch(err){ setResultText('Error: '+String(err)); }
   });
