@@ -1,0 +1,8 @@
+
+> aai@0.1.0 dev
+> node server/index.js
+
+AAI server listening on http://localhost:3000
+/api/solve called -- preview= true hasInput= true attachments= 0
+/api/solve called -- preview= true hasInput= true attachments= 0
+/api/solve called -- preview= true hasInput= true attachments= 0
