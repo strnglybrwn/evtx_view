@@ -1,56 +1,98 @@
 <!-- Purpose: concise, actionable guidance for AI coding agents working in this repository -->
 # Copilot instructions — AAI
 
-Purpose
-- Help an AI agent be immediately productive in this repository. The only existing project artifact is `AAI/instructions.txt` which says: "create a simple web application with an input box and a submit button that uses a range of agents to solve for the challenge or query presented by the user." Use that as the source of truth.
+## Purpose
+Help AI agents be immediately productive in this agent orchestration prototype for web-based multi-agent queries.
 
-Quick summary (what to build)
-- Single-page web UI with a text input and a submit button.
-- A lightweight server (or serverless endpoint) that accepts the user query and orchestrates a set of "agents" (small functions/services) to produce a combined result.
+## Quick start
+```bash
+npm install
+npm run dev  # starts Express server at http://localhost:3000
+```
 
-What is discoverable here
-- `AAI/instructions.txt` — project goal and user-facing requirement. No source code, build or test scripts were found in the repo at time of writing.
+## Architecture overview
 
-Assumptions (stated explicitly)
-- The repo is a skeleton. It's acceptable to introduce a conventional layout: `web/` for frontend, `api/` or `server/` for backend/orchestrator, and `agents/` for agent implementations. If you add these, document them in the repo.
+**Data flow:** user input (text + optional attachments) → agent selection (via `supports()` scoring) → run top agent → return result + history
 
-Big-picture architecture (for the agent)
-- Frontend (web/): form -> POST /api/solve
-- Orchestrator (api/solve endpoint): receives { input: string } and invokes 0..N agents.
-- Agents (agents/): small modules exporting a run(input) -> { output, score?, metadata? }.
-- Response format: { result: string, agents: [{name, output, metadata}] }
+**Key components:**
+- **web/** — vanilla JS UI: paste/drop images, input field, preview agent selection, SSE stream for live updates
+- **server/index.js** — Express orchestrator with session management, two API endpoints:
+  - `POST /api/solve` — synchronous: returns agent scores, selection rationale, result
+  - `GET /api/solve-stream` — SSE stream of agent events (`agent-score`, `agent-start`, `agent-done`, `final`)
+- **agents/** — modular agent implementations (exampleAgent, duckduckgoAgent, openaiAgent)
+- **lib/secretStore.js** — transient key-value store persisting to `.env.local` (plaintext, dev-only)
 
-Concrete patterns and file examples to follow
-- Agent modules: export async function run(input) and return a compact object. Example filename: `agents/llm-summary.js`.
-- API endpoint: `api/solve.js` (or `server/solve.ts`) should call agents in sequence or in parallel and merge outputs.
-- UI entrypoint: `web/index.html` or `web/src/App.(js|tsx)` with a single input and submit flow wired to `/api/solve`.
+## Agent contract & selection
 
-Data contract (explicit example)
-- Request: POST /api/solve
-  - body: { "input": "<user query>" }
-- Response: 200
-  - body: { "result": "final combined answer", "agents": [{"name":"llm-summary","output":"...","durationMs":123}] }
+**Agent module interface** (`agents/exampleAgent.js`):
+```javascript
+// Exports all three; run is async, supports is sync.
+module.exports = { run, supports, requirements };
 
-Developer workflows (discoverable / conservative commands)
-- If you create a Node-based prototype, include a `package.json` and use these conventional commands (document in the repo):
-  - install dependencies: `npm install`
-  - run dev server: `npm run dev` (or `node server/index.js`)
-  - run tests: `npm test` (if tests added)
-  Note: these are suggestions only — do not assume an existing toolchain without adding the files.
+async function run(input) {
+  // ... call external API or local logic ...
+  return { output: "result string", metadata: { key: "value" } };
+}
 
-Project-specific conventions to use
-- Keep agent modules tiny and composable. Each agent should focus on a single strategy (e.g., search, summarization, rule-based parsing).
-- Agents must not depend on global state. Return plain JSON-serializable results.
-- Put integration wiring in `api/` or `server/` and keep UI in `web/`.
+function supports(input) {
+  // Return 0.0–1.0. Server selects agent with score >= 0.6; ties broken by highest score.
+  // Heuristic example: if (input.includes("weather")) return 0.85;
+  return 0.5;
+}
 
-Integration points and observability
-- Log agent timings and errors in the orchestrator response under `agents[].metadata`.
-- Return agent selection metadata so reviewers can see which agents were used and why.
+const requirements = ['internet-access']; // e.g., 'openai_api_key', 'image-analysis'
+```
 
-When you update this file
-- Merge gently: preserve `AAI/instructions.txt` content and any future notes in this file. If you change the assumed layout, add a short note explaining why.
+**Agent selection logic** (in `server/index.js`):
+- All agents scored simultaneously; highest-scoring agent with score ≥ 0.6 is selected
+- If no agent exceeds threshold, client is told which `needs` are inferred from the query
+- History agents (`openaiAgent`, `exampleAgent`) automatically receive conversation history prepended to input
 
-If anything here is ambiguous
-- Ask: which runtime (Node, Deno, Python) should be used or whether you should scaffold the frontend framework. Reference `AAI/instructions.txt` when making trade-offs.
+## Key patterns & conventions
 
-End: please report back which files you created (paths) so the next agent can continue.
+1. **Agents are stateless & composable.** Return plain objects `{ output, metadata }`. No global state or side effects.
+2. **Attachments handling.** Images are base64-encoded client-side, sent in `POST /api/solve` as array. Server validates size (~3MB max).
+3. **Session & history.** Each user gets a session cookie (`aai_sid`). Last 10 Q/A pairs cached in-memory per session.
+4. **Secrets management.** Use `lib/secretStore.js` to check for keys. OpenAI agent searches multiple sources (env, `.env`, `.env.local`, secretStore).
+5. **Error handling.** Agent errors caught in orchestrator; returned in response under `agents[].error`. No silent failures.
+6. **Timing & metadata.** Every agent result includes `durationMs` and `metadata`. Stream events include these for UI visibility.
+
+## API contracts
+
+**POST /api/solve**
+```
+Request: { input: "string", attachments?: [{name, type, data: base64}], preview?: boolean }
+Response: { result: "...", agents: [{name, output, durationMs, metadata?, error?}], scored, rationale }
+- preview=true returns scores & selection without running agents
+```
+
+**GET /api/solve-stream?input=...**
+```
+SSE stream emitting: agent-score, agent-start, agent-done, agent-error, selection, final, done
+Each event is JSON in data field. UI opens stream on "Run with live updates" button click.
+```
+
+## Developer workflows
+
+- **Add new agent:** Create `agents/myAgent.js` with `run()`, `supports()`, `requirements`. Register in server's `registered` array (lines ~130, ~210, ~280).
+- **Test agent scoring:** POST to `/api/solve` with `"preview": true` to see scores without execution.
+- **Debug secrets:** Edit `.env.local` directly or call `lib/secretStore.set()`. File is gitignored.
+- **Session management:** Session cookie is `aai_sid` (HttpOnly). History persists in `memoryStore` map during server runtime (lost on restart).
+
+## Important caveats & TODOs
+
+- **Secrets in plaintext.** `.env.local` is never committed but exists on disk. Development-only pattern.
+- **In-memory history.** Lost on server restart. Production would use a database.
+- **Single agent execution.** Currently selects top agent by score. Multi-agent is not implemented.
+- **Attachment analysis is stubbed.** Image processing returns dummy metadata (no real vision API).
+- **No authentication.** Session cookie is not cryptographically signed; suitable for local dev only.
+
+## File reference
+
+Key files exemplifying patterns:
+- [server/index.js](server/index.js#L115-L145) — agent scoring & selection
+- [server/index.js](server/index.js#L72-L100) — SSE event streaming
+- [agents/openaiAgent.js](agents/openaiAgent.js#L30-50) — secret key lookup pattern
+- [agents/duckduckgoAgent.js](agents/duckduckgoAgent.js#L35-45) — supports() heuristic
+- [lib/secretStore.js](lib/secretStore.js) — key-value persistence to `.env.local`
+- [web/main.js](web/main.js#L60-90) — paste/drop image handling
