@@ -1,6 +1,7 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const path = require('path');
+const crypto = require('crypto');
 
 const exampleAgent = require('../agents/exampleAgent');
 const duckAgent = require('../agents/duckduckgoAgent');
@@ -13,6 +14,46 @@ const secretStore = require('../lib/secretStore');
 const MAX_ATTACHMENTS = 5;
 const MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024;
 const MAX_B64_LENGTH = Math.ceil(MAX_ATTACHMENT_BYTES * 4 / 3);
+const HISTORY_LIMIT = 10;
+const memoryStore = new Map(); // sessionId -> [{question, answer, ts}]
+const HISTORY_AGENTS = new Set(['openaiAgent', 'exampleAgent']);
+
+function parseCookies(req) {
+  const header = req.headers && req.headers.cookie;
+  if (!header) return {};
+  return header.split(';').reduce((acc, part) => {
+    const [k, v] = part.split('=');
+    if (k && v) acc[k.trim()] = decodeURIComponent(v.trim());
+    return acc;
+  }, {});
+}
+
+function ensureSession(req, res) {
+  const cookies = parseCookies(req);
+  let sid = cookies.aai_sid;
+  if (!sid) {
+    sid = crypto.randomUUID();
+    res.setHeader('Set-Cookie', `aai_sid=${sid}; Path=/; HttpOnly; SameSite=Lax`);
+  }
+  return sid;
+}
+
+function getHistory(sessionId) {
+  return memoryStore.get(sessionId) || [];
+}
+
+function appendHistory(sessionId, entry) {
+  const hist = memoryStore.get(sessionId) || [];
+  hist.push(entry);
+  while (hist.length > HISTORY_LIMIT) hist.shift();
+  memoryStore.set(sessionId, hist);
+}
+
+function buildHistoryPrompt(input, history) {
+  if (!history || !history.length) return input;
+  const summary = history.map((h, idx) => `Q${idx + 1}: ${h.question}\nA${idx + 1}: ${h.answer}`).join('\n\n');
+  return `Prior conversation:\n${summary}\n\nUser question: ${input}`;
+}
 
 // allow larger JSON bodies for base64 attachments (phones can be several MB)
 app.use(bodyParser.json({ limit: '10mb' }));
@@ -47,6 +88,8 @@ function sendEvent(res, event, data) {
 }
 
 app.get('/api/solve-stream', async (req, res) => {
+  const sessionId = ensureSession(req, res);
+  const history = getHistory(sessionId);
   const input = req.query && req.query.input;
   if (!input || typeof input !== 'string') {
     return res.status(400).json({ error: 'missing input (use ?input=...)' });
@@ -95,14 +138,18 @@ app.get('/api/solve-stream', async (req, res) => {
     // include rationale: top candidate and why it was chosen
     sendEvent(res, 'selection', { selected: suitable.map(s => ({ name: s.name, score: s.score })), rationale: suitable.length ? `Selected ${suitable[0].name} with score ${suitable[0].score}` : 'No candidate reached threshold' });
 
-  const runners = suitable.map(s => ({ name: s.name, fn: s.mod.run }));
+  const runners = suitable.map(s => ({
+    name: s.name,
+    fn: s.mod.run,
+    input: HISTORY_AGENTS.has(s.name) ? buildHistoryPrompt(input, history) : input
+  }));
 
   // start all agents in parallel and stream their events
   const promises = runners.map(r => (async () => {
     sendEvent(res, 'agent-start', { name: r.name });
     const t0 = Date.now();
     try {
-      const out = await r.fn(input);
+      const out = await r.fn(r.input);
       const durationMs = Date.now() - t0;
       sendEvent(res, 'agent-done', { name: r.name, output: out.output, metadata: out.metadata || {}, durationMs });
       return { name: r.name, output: out.output, metadata: out.metadata || {}, durationMs };
@@ -117,6 +164,7 @@ app.get('/api/solve-stream', async (req, res) => {
   Promise.all(promises).then(results => {
     const final = results.map(r => r.output || (`[${r.name} error] ${r.error || 'no output'}`)).join('\n\n');
     sendEvent(res, 'final', { result: final, agents: results, durationMs: Date.now() - streamStart });
+    appendHistory(sessionId, { question: input, answer: final, ts: Date.now() });
     // indicate done then end
     sendEvent(res, 'done', {});
     setTimeout(() => res.end(), 100);
@@ -133,6 +181,8 @@ app.get('/api/solve-stream', async (req, res) => {
 
 // Main API: orchestrator that calls agents
 app.post('/api/solve', async (req, res) => {
+  const sessionId = ensureSession(req, res);
+  const history = getHistory(sessionId);
   const input = req.body && req.body.input;
   const preview = req.body && req.body.preview;
   const attachments = req.body && Array.isArray(req.body.attachments) ? req.body.attachments : [];
@@ -163,6 +213,7 @@ app.post('/api/solve', async (req, res) => {
     try {
       const names = attachments.map(a => a.name || 'unnamed').join(', ');
       const out = `Received ${attachments.length} attachment(s): ${names}. Analysis: (stub) no faces detected, dominant color: yellow-ish.`;
+      appendHistory(sessionId, { question: names, answer: out, ts: Date.now() });
       return res.json({ result: out, agents: [{ name: 'attachmentStub', output: out, metadata: { attachments: attachments.length } }], durationMs: 0, scored: [], rationale: 'Ran attachment analysis (stub) because no text input provided' });
     } catch (e) {
       return res.status(500).json({ error: String(e) });
@@ -203,7 +254,8 @@ app.post('/api/solve', async (req, res) => {
     const results = await Promise.all(runners.map(async r => {
       const aStart = Date.now();
       try {
-        const out = await r.fn(input);
+        const prompt = HISTORY_AGENTS.has(r.name) ? buildHistoryPrompt(input, history) : input;
+        const out = await r.fn(prompt);
         return { name: r.name, output: out.output, durationMs: Date.now() - aStart, metadata: out.metadata || {} };
       } catch (err) {
         return { name: r.name, error: String(err), durationMs: Date.now() - aStart };
@@ -211,6 +263,7 @@ app.post('/api/solve', async (req, res) => {
     }));
 
   const result = results.map(r => r.output || (`[${r.name} error] ${r.error || 'no output'}`)).join('\n\n');
+  appendHistory(sessionId, { question: input, answer: result, ts: Date.now() });
   res.json({ result, agents: results, durationMs: Date.now() - start, scored, rationale: suitable.length ? `Selected ${suitable[0].name} with score ${suitable[0].score}` : 'No candidate reached threshold' });
   } catch (err) {
     res.status(500).json({ error: String(err) });
@@ -219,6 +272,8 @@ app.post('/api/solve', async (req, res) => {
 
 // Accept provided resources (files, apiKey) and attempt to run agents if requirements are met
 app.post('/api/provide', async (req, res) => {
+  const sessionId = ensureSession(req, res);
+  const history = getHistory(sessionId);
   const { input, attachments, apiKey, needs } = req.body || {};
   if (!input) return res.status(400).json({ error: 'missing input' });
 
@@ -236,6 +291,7 @@ app.post('/api/provide', async (req, res) => {
   if (needs && needs.includes('image-analysis') && provided.attachments.length > 0) {
     // run a trivial image-analysis stub (synchronous)
     const out = `Received ${provided.attachments.length} attachment(s). Analysis: no faces detected (stub).`;
+    appendHistory(sessionId, { question: input, answer: out, ts: Date.now() });
     return res.json({ ran: true, result: out });
   }
 
@@ -260,9 +316,14 @@ app.post('/api/provide', async (req, res) => {
       if (suitable.length === 0) return res.json({ ran: false, message: 'Still no suitable agent after providing apiKey' });
       const runners = suitable.map(s => ({ name: s.name, fn: s.mod.run }));
       const results = await Promise.all(runners.map(async r => {
-        try { const out = await r.fn(input); return { name: r.name, output: out.output }; } catch (e) { return { name: r.name, error: String(e) }; }
+        try {
+          const prompt = HISTORY_AGENTS.has(r.name) ? buildHistoryPrompt(input, history) : input;
+          const out = await r.fn(prompt);
+          return { name: r.name, output: out.output };
+        } catch (e) { return { name: r.name, error: String(e) }; }
       }));
       const final = results.map(r => r.output || (`[${r.name} error] ${r.error || 'no output'}`)).join('\n\n');
+      appendHistory(sessionId, { question: input, answer: final, ts: Date.now() });
       return res.json({ ran: true, result: final, agents: results });
     } catch (err) {
       return res.status(500).json({ error: String(err) });

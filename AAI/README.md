@@ -19,6 +19,7 @@ node AAI/server/index.js
 - `server/` — Express server and API implementation (`index.js`). Implements preview mode, SSE streaming, attachments handling, and an in-memory secret store.
 - `agents/` — agent modules. Each exports `supports(input): number` and `run(input): Promise<{output, metadata}>`.
 - `lib/secretStore.js` — small secret storage used by agent modules.
+- Conversation memory: server issues a lightweight session cookie and keeps the last 10 Q/A pairs in-memory (per session). Language-model style agents receive prior Q/A as context automatically.
 
 API (summary)
 
