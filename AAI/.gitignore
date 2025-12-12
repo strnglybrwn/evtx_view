@@ -11,3 +11,4 @@ yarn-error.log*
 logs/
 .aai.pid
 server.log
+.env.test

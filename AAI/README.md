@@ -71,6 +71,29 @@ The server handles `SIGTERM` and `SIGINT` signals gracefully:
 
 Startup scripts (`startup.sh` / `startup.bat`) handle this automatically.
 
+## Testing
+
+The project includes comprehensive test coverage using Jest:
+
+```bash
+# Run all tests
+npm test
+
+# Run tests in watch mode (re-run on code changes)
+npm run test:watch
+
+# Generate coverage report
+npm test -- --coverage
+
+# Debug tests
+npm run test:debug
+```
+
+**Test structure:**
+- Unit tests for agents and libraries in `__tests__/agents/`, `__tests__/lib/`
+- Integration tests for API endpoints in `__tests__/server/`
+- See [TESTING.md](TESTING.md) for detailed test documentation
+
 
 
 ### Commands
