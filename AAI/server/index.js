@@ -2,19 +2,22 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const path = require('path');
 const crypto = require('crypto');
+require('dotenv').config();
 
+const logger = require('../lib/logger');
 const exampleAgent = require('../agents/exampleAgent');
 const duckAgent = require('../agents/duckduckgoAgent');
 const openaiAgent = require('../agents/openaiAgent');
 
 const app = express();
 const port = process.env.PORT || 3000;
+const nodeEnv = process.env.NODE_ENV || 'development';
 
 const secretStore = require('../lib/secretStore');
-const MAX_ATTACHMENTS = 5;
-const MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024;
+const MAX_ATTACHMENTS = parseInt(process.env.MAX_ATTACHMENTS || '5', 10);
+const MAX_ATTACHMENT_BYTES = parseInt(process.env.MAX_ATTACHMENT_BYTES || '3145728', 10);
 const MAX_B64_LENGTH = Math.ceil(MAX_ATTACHMENT_BYTES * 4 / 3);
-const HISTORY_LIMIT = 10;
+const HISTORY_LIMIT = parseInt(process.env.HISTORY_LIMIT || '10', 10);
 const memoryStore = new Map(); // sessionId -> [{question, answer, ts}]
 const HISTORY_AGENTS = new Set(['openaiAgent', 'exampleAgent']);
 
@@ -196,7 +199,11 @@ app.post('/api/solve', async (req, res) => {
 
   // debug log to help diagnose missing-input issues
   try {
-    console.log('/api/solve called -- preview=', !!preview, 'hasInput=', typeof input === 'string' && input.trim().length > 0, 'attachments=', attachments.length);
+    logger.debug('POST /api/solve received', {
+      preview: !!preview,
+      hasInput: typeof input === 'string' && input.trim().length > 0,
+      attachments: attachments.length
+    });
   } catch (e) { }
 
   // accept either a non-empty input string OR at least one attachment
@@ -333,6 +340,51 @@ app.post('/api/provide', async (req, res) => {
   return res.json({ ran: false, message: 'No actionable resources provided' });
 });
 
-app.listen(port, () => {
-  console.log(`AAI server listening on http://localhost:${port}`);
+const server = app.listen(port, () => {
+  logger.info(`AAI server started`, {
+    port,
+    environment: nodeEnv,
+    url: `http://localhost:${port}`
+  });
+});
+
+// Graceful shutdown handlers
+let isShuttingDown = false;
+
+const shutdownGracefully = (signal) => {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+
+  logger.info(`${signal} received, initiating graceful shutdown...`);
+
+  server.close(() => {
+    logger.info('Server closed, all connections terminated');
+    process.exit(0);
+  });
+
+  // Force shutdown after 30 seconds
+  setTimeout(() => {
+    logger.error('Graceful shutdown timeout, forcing exit');
+    process.exit(1);
+  }, 30000);
+};
+
+process.on('SIGTERM', () => shutdownGracefully('SIGTERM'));
+process.on('SIGINT', () => shutdownGracefully('SIGINT'));
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (err) => {
+  logger.error('Uncaught exception', {
+    message: err.message,
+    stack: err.stack
+  });
+  process.exit(1);
+});
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error('Unhandled promise rejection', {
+    reason: String(reason),
+    promise: String(promise)
+  });
 });

@@ -86,8 +86,24 @@ Response: { ran: boolean, result?: "...", agents?: [...], message?: "..." }
 
 - **Add new agent:** Create `agents/myAgent.js` with `run()`, `supports()`, `requirements`. Register in server's `registered` array (lines ~130, ~210, ~280).
 - **Test agent scoring:** POST to `/api/solve` with `"preview": true` to see scores without execution.
-- **Debug secrets:** Edit `.env.local` directly or call `lib/secretStore.set()`. File is gitignored.
+- **Configure environment:** Copy `.env.example` to `.env` and customize. Configuration loads at startup via `dotenv`.
+- **View logs:** Logs are written to `logs/error.log` (errors only) and `logs/combined.log` (all levels). Set `LOG_LEVEL=debug` for verbose output.
 - **Session management:** Session cookie is `aai_sid` (HttpOnly). History persists in `memoryStore` map during server runtime (lost on restart).
+- **Graceful shutdown:** Server handles SIGTERM/SIGINT and allows 30s for in-flight requests to complete before forced exit.
+
+## Configuration & Logging
+
+**Environment variables** (see `.env.example`):
+- `PORT` — Server port (default: 3000)
+- `NODE_ENV` — Environment: "development" or "production" (affects logging output)
+- `LOG_LEVEL` — Logging verbosity: error, warn, info, debug (default: info)
+- `MAX_ATTACHMENTS`, `MAX_ATTACHMENT_BYTES`, `HISTORY_LIMIT` — Size/count limits (all configurable)
+- `REQUEST_TIMEOUT_MS`, `SESSION_TIMEOUT_MS` — Timeout values
+
+**Structured logging** via [Winston](https://github.com/winstonjs/winston):
+- Console output in development; file-only in production
+- All logs are JSON-formatted for easy parsing by monitoring tools
+- View: `tail -f logs/combined.log`
 
 ## Important caveats & TODOs
 

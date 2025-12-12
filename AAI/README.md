@@ -24,9 +24,54 @@ npm run dev
 # open http://localhost:3000 in your browser
 ```
 
-## Startup script usage
+## Environment Configuration
 
-The `startup.sh` (macOS/Linux) and `startup.bat` (Windows) scripts automate server management. Use from the project root:
+The server uses environment variables for configuration. Copy `.env.example` to `.env` and customize:
+
+```bash
+# from repo root
+cp .env.example .env
+```
+
+**Configuration options:**
+```bash
+PORT=3000                    # Server port
+NODE_ENV=development         # Environment (development or production)
+LOG_LEVEL=info              # Logging level (error, warn, info, debug)
+MAX_ATTACHMENTS=5           # Max file uploads per request
+MAX_ATTACHMENT_BYTES=3145728 # Max size per file (~3MB)
+HISTORY_LIMIT=10            # Max conversation history to retain
+SESSION_TIMEOUT_MS=3600000  # Session timeout in milliseconds
+REQUEST_TIMEOUT_MS=10000    # API request timeout
+```
+
+## Logging
+
+The server uses structured logging via [Winston](https://github.com/winstonjs/winston):
+
+- **Development:** Logs appear in console and files (`logs/error.log`, `logs/combined.log`)
+- **Production:** Only file-based logs (no console output)
+- **Log levels:** error, warn, info, debug
+
+View logs in real-time:
+```bash
+# Unix
+tail -f logs/combined.log
+
+# Windows
+Get-Content logs/combined.log -Wait
+```
+
+## Graceful Shutdown
+
+The server handles `SIGTERM` and `SIGINT` signals gracefully:
+- Closes the HTTP server
+- Allows in-flight requests to complete (30-second timeout)
+- Cleans up resources
+
+Startup scripts (`startup.sh` / `startup.bat`) handle this automatically.
+
+
 
 ### Commands
 

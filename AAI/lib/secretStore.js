@@ -2,6 +2,7 @@
 // WARNING: This is a development convenience only. Secrets are stored in plaintext on disk.
 const fs = require('fs');
 const path = require('path');
+const logger = require('./logger');
 
 const FILE = path.join(__dirname, '..', '.env.local');
 const store = new Map();
@@ -18,7 +19,10 @@ function loadFromDisk() {
         if (k) store.set(k, v);
       }
     });
-  } catch (e) { /* ignore */ }
+    logger.debug('Loaded secrets from disk', { file: FILE, count: store.size });
+  } catch (e) {
+    logger.warn('Failed to load secrets from disk', { error: e.message });
+  }
 }
 
 function persistToDisk() {
@@ -26,7 +30,10 @@ function persistToDisk() {
     const lines = [];
     for (const [k, v] of store.entries()) lines.push(`${k}=${v}`);
     fs.writeFileSync(FILE, lines.join('\n'), { encoding: 'utf8', mode: 0o600 });
-  } catch (e) { /* ignore write errors */ }
+    logger.debug('Persisted secrets to disk', { file: FILE });
+  } catch (e) {
+    logger.warn('Failed to persist secrets to disk', { error: e.message });
+  }
 }
 
 loadFromDisk();
@@ -34,6 +41,7 @@ loadFromDisk();
 function set(key, value) {
   store.set(key, value);
   persistToDisk();
+  logger.debug('Secret store updated', { key });
 }
 
 function get(key) {
@@ -44,6 +52,7 @@ function clear(key) {
   if (key) store.delete(key);
   else store.clear();
   persistToDisk();
+  logger.debug('Secret store cleared', { key: key || 'all' });
 }
 
 module.exports = { set, get, clear };
