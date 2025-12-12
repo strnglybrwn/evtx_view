@@ -119,8 +119,8 @@ app.get('/api/solve-stream', async (req, res) => {
     scored.forEach(s => sendEvent(res, 'agent-score', { name: s.name, score: s.score }));
     const suitableAll = scored.filter(s => s.score >= 0.6).sort((a,b) => b.score - a.score);
 
-  // choose the single top agent only
-  const suitable = suitableAll.length ? [suitableAll[0]] : [];
+  // run all suitable agents (not just the top one)
+  const suitable = suitableAll;
 
   // if none suitable, inform the client what is missing
   if (suitable.length === 0) {
@@ -140,8 +140,8 @@ app.get('/api/solve-stream', async (req, res) => {
     return res.end();
   }
 
-    // include rationale: top candidate and why it was chosen
-    sendEvent(res, 'selection', { selected: suitable.map(s => ({ name: s.name, score: s.score })), rationale: suitable.length ? `Selected ${suitable[0].name} with score ${suitable[0].score}` : 'No candidate reached threshold' });
+    // include rationale: show all suitable agents and why they were chosen
+    sendEvent(res, 'selection', { selected: suitable.map(s => ({ name: s.name, score: s.score })), rationale: suitable.length ? `Running ${suitable.length} suitable agent(s): ${suitable.map(s => s.name).join(', ')}` : 'No candidate reached threshold' });
 
   const runners = suitable.map(s => ({
     name: s.name,
@@ -239,11 +239,11 @@ app.post('/api/solve', async (req, res) => {
     ];
     const scored = registered.map(r => ({ name: r.name, score: (typeof r.mod.supports === 'function') ? r.mod.supports(input) : 0, mod: r.mod }));
   const suitableAll = scored.filter(s => s.score >= 0.6).sort((a,b) => b.score - a.score);
-  const suitable = suitableAll.length ? [suitableAll[0]] : [];
+  const suitable = suitableAll;
 
     // If client asked for preview, return scoring and rationale without running agents
     if (preview) {
-    return res.json({ scored, suitable: suitable.map(s => ({ name: s.name, score: s.score })), rationale: suitable.length ? `Selected ${suitable[0].name} with score ${suitable[0].score}` : 'No candidate reached threshold', attachments: attachments.length });
+    return res.json({ scored, suitable: suitable.map(s => ({ name: s.name, score: s.score })), rationale: suitable.length ? `Running ${suitable.length} suitable agent(s): ${suitable.map(s => s.name).join(', ')}` : 'No candidate reached threshold', attachments: attachments.length });
   }
 
   if (suitable.length === 0) {
@@ -273,7 +273,7 @@ app.post('/api/solve', async (req, res) => {
 
   const result = results.map(r => r.output || (`[${r.name} error] ${r.error || 'no output'}`)).join('\n\n');
   appendHistory(sessionId, { question: input, answer: result, ts: Date.now() });
-  res.json({ result, agents: results, durationMs: Date.now() - start, scored, rationale: suitable.length ? `Selected ${suitable[0].name} with score ${suitable[0].score}` : 'No candidate reached threshold' });
+  res.json({ result, agents: results, durationMs: Date.now() - start, scored, rationale: suitable.length ? `Running ${suitable.length} suitable agent(s): ${suitable.map(s => s.name).join(', ')}` : 'No candidate reached threshold' });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }

@@ -19,10 +19,16 @@ document.addEventListener('DOMContentLoaded', () => {
     try{
       if (typeof text === 'function') result.textContent = text(result.textContent || '');
       else result.textContent = text || '';
-      // Ensure result div is always visible (fixes rendering issue)
+      // Ensure result div is always visible
       result.style.display = 'block';
       result.style.opacity = '1';
       result.style.visibility = 'visible';
+      result.style.backgroundColor = '#0a1a2e';
+      result.style.color = '#ffffff';
+      result.style.fontSize = '14px';
+      result.style.minHeight = '140px';
+      console.log('DOM updated. result.textContent:', result.textContent);
+      console.log('DOM check - display:', result.style.display, 'opacity:', result.style.opacity, 'visibility:', result.style.visibility);
     }catch(e){ console.warn(e); }
   }
 
