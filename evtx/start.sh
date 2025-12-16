@@ -139,7 +139,7 @@ start_application() {
         print_success "Application started successfully (PID: $pid)"
         echo ""
         print_info "Frontend available at: ${BLUE}http://localhost:3000${NC}"
-        print_info "Backend available at: ${BLUE}http://localhost:5000${NC}"
+        print_info "Backend available at: ${BLUE}http://localhost:5001${NC}"
         echo ""
         print_info "Logs: $SCRIPT_DIR/.evtx-analyzer.log"
     else
