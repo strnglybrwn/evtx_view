@@ -22,6 +22,10 @@ server/.env.local
 # Uploads
 uploads/
 
+# Application
+.evtx-analyzer.pid
+.evtx_analyser.log
+
 # IDE
 .vscode/
 .idea/
