@@ -77,10 +77,79 @@ function App() {
 
         {analysisResult && (
           <div className="results-section">
-            <h2>Analysis Results</h2>
-            <pre className="results-content">
-              {JSON.stringify(analysisResult, null, 2)}
-            </pre>
+            <h2>📊 Analysis Results</h2>
+            
+            <div className="stats-grid">
+              <div className="stat-card">
+                <h3>Total Events</h3>
+                <p className="stat-value">{analysisResult.stats?.totalEvents || 0}</p>
+              </div>
+              <div className="stat-card">
+                <h3>Critical</h3>
+                <p className="stat-value critical">{analysisResult.stats?.eventLevels?.Critical || 0}</p>
+              </div>
+              <div className="stat-card">
+                <h3>Errors</h3>
+                <p className="stat-value error">{analysisResult.stats?.eventLevels?.Error || 0}</p>
+              </div>
+              <div className="stat-card">
+                <h3>Warnings</h3>
+                <p className="stat-value warning">{analysisResult.stats?.eventLevels?.Warning || 0}</p>
+              </div>
+            </div>
+
+            {analysisResult.stats?.timeRange && (
+              <div className="time-range">
+                <p><strong>Time Range:</strong> {analysisResult.stats.timeRange.earliest} to {analysisResult.stats.timeRange.latest}</p>
+              </div>
+            )}
+
+            {analysisResult.stats?.eventSources && Object.keys(analysisResult.stats.eventSources).length > 0 && (
+              <div className="data-section">
+                <h3>Event Sources (Top Providers)</h3>
+                <ul className="source-list">
+                  {Object.entries(analysisResult.stats.eventSources)
+                    .sort(([, a], [, b]) => (b as number) - (a as number))
+                    .slice(0, 10)
+                    .map(([source, count]) => (
+                      <li key={source}>
+                        <span className="source-name">{source}</span>
+                        <span className="source-count">{count as number} events</span>
+                      </li>
+                    ))}
+                </ul>
+              </div>
+            )}
+
+            {analysisResult.sampleEvents && analysisResult.sampleEvents.length > 0 && (
+              <div className="data-section">
+                <h3>Sample Events (First 100)</h3>
+                <div className="events-table">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Time Created</th>
+                        <th>Event ID</th>
+                        <th>Level</th>
+                        <th>Provider</th>
+                        <th>Computer</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {analysisResult.sampleEvents.map((event: any, idx: number) => (
+                        <tr key={idx} className={`level-${event.level?.toLowerCase()}`}>
+                          <td className="time">{event.timeCreated}</td>
+                          <td className="event-id">{event.eventId}</td>
+                          <td className={`level ${event.level?.toLowerCase()}`}>{event.level}</td>
+                          <td className="provider">{event.provider}</td>
+                          <td className="computer">{event.computer}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </main>
