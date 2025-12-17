@@ -47,7 +47,7 @@ const fileFilter = (
 const upload = multer({ storage, fileFilter, limits: { fileSize: 100 * 1024 * 1024 } })
 
 // Parse EVTX file and extract events
-async function parseEvtxFile(filePath: string) {
+async function parseEvtxFile(filePathOrBuffer: string | Buffer) {
   const records: any[] = []
   const stats = {
     totalEvents: 0,
@@ -56,18 +56,23 @@ async function parseEvtxFile(filePath: string) {
     eventIds: new Map<string, number>(),
     timeRange: { earliest: null as string | null, latest: null as string | null },
   }
-
+  // If caller passed a Buffer, write it to a temp file for the parser
+  let tempPath: string | null = null
+  let filePath = filePathOrBuffer as string
   try {
-    const parser = new EvtxParser(filePath)
-    
-    // Get the header information
-    const header = parser.header()
-    
-    // Try to get chunks - evtx-parser uses a different API
-    // For now, return basic file info since the sample file isn't a real EVTX
+    if (Buffer.isBuffer(filePathOrBuffer)) {
+      tempPath = path.join(uploadDir, `tmp-${Date.now()}.evtx`)
+      fs.writeFileSync(tempPath, filePathOrBuffer)
+      filePath = tempPath
+    }
+
+    const parser = new EvtxParser(String(filePath))
+
+    // Get the header information (may throw for invalid files)
+    const header = parser.header && typeof parser.header === 'function' ? parser.header() : null
+
+    // For non-standard/sample files, evtx-parser may not be able to iterate events.
     const fileStats = fs.statSync(filePath)
-    
-    stats.totalEvents = 0
 
     // Convert Maps to objects for JSON serialization
     return {
@@ -87,7 +92,7 @@ async function parseEvtxFile(filePath: string) {
   } catch (error) {
     // Handle as a basic file if EVTX parsing fails
     const fileStats = fs.statSync(filePath)
-    
+
     return {
       success: true,
       message: 'File uploaded successfully. Note: Advanced parsing requires a valid Windows EVTX file.',
@@ -104,6 +109,10 @@ async function parseEvtxFile(filePath: string) {
         timeRange: { earliest: null, latest: null },
       },
       sampleEvents: [],
+    }
+  } finally {
+    if (tempPath && fs.existsSync(tempPath)) {
+      try { fs.unlinkSync(tempPath) } catch (e) { /* ignore */ }
     }
   }
 }
