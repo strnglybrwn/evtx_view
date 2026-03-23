@@ -13,7 +13,6 @@ const app = express();
 const port = process.env.PORT || 3000;
 const nodeEnv = process.env.NODE_ENV || 'development';
 
-const secretStore = require('../lib/secretStore');
 const MAX_ATTACHMENTS = parseInt(process.env.MAX_ATTACHMENTS || '5', 10);
 const MAX_ATTACHMENT_BYTES = parseInt(process.env.MAX_ATTACHMENT_BYTES || '3145728', 10);
 const MAX_B64_LENGTH = Math.ceil(MAX_ATTACHMENT_BYTES * 4 / 3);
@@ -39,6 +38,16 @@ function ensureSession(req, res) {
     res.setHeader('Set-Cookie', `aai_sid=${sid}; Path=/; HttpOnly; SameSite=Lax`);
   }
   return sid;
+}
+
+function getRequestApiKey(req) {
+  const headerValue = req && req.headers ? req.headers['x-openai-api-key'] : null;
+  const fromHeader = Array.isArray(headerValue) ? headerValue[0] : headerValue;
+  const fromBody = req && req.body && typeof req.body.apiKey === 'string' ? req.body.apiKey : null;
+  const raw = (typeof fromHeader === 'string' && fromHeader.trim()) ? fromHeader : fromBody;
+  if (typeof raw !== 'string') return null;
+  const key = raw.trim();
+  return key.length ? key : null;
 }
 
 function getHistory(sessionId) {
@@ -95,6 +104,7 @@ function sendEvent(res, event, data) {
 app.get('/api/solve-stream', async (req, res) => {
   const sessionId = ensureSession(req, res);
   const history = getHistory(sessionId);
+  const requestApiKey = getRequestApiKey(req);
   const input = req.query && req.query.input;
   if (!input || typeof input !== 'string') {
     return res.status(400).json({ error: 'missing input (use ?input=...)' });
@@ -114,7 +124,11 @@ app.get('/api/solve-stream', async (req, res) => {
   ];
 
     // score agents by supports() and pick suitable ones
-    const scored = registered.map(r => ({ name: r.name, score: (typeof r.mod.supports === 'function') ? r.mod.supports(input) : 0, mod: r.mod }));
+    const scored = registered.map(r => ({
+      name: r.name,
+      score: (typeof r.mod.supports === 'function') ? r.mod.supports(input, { apiKey: requestApiKey }) : 0,
+      mod: r.mod
+    }));
     // stream each agent's score for UI visibility
     scored.forEach(s => sendEvent(res, 'agent-score', { name: s.name, score: s.score }));
     const suitableAll = scored.filter(s => s.score >= 0.6).sort((a,b) => b.score - a.score);
@@ -146,7 +160,8 @@ app.get('/api/solve-stream', async (req, res) => {
   const runners = suitable.map(s => ({
     name: s.name,
     fn: s.mod.run,
-    input: HISTORY_AGENTS.has(s.name) ? buildHistoryPrompt(input, history) : input
+    input: HISTORY_AGENTS.has(s.name) ? buildHistoryPrompt(input, history) : input,
+    context: s.name === 'openaiAgent' && requestApiKey ? { apiKey: requestApiKey } : undefined
   }));
 
   // start all agents in parallel and stream their events
@@ -154,7 +169,7 @@ app.get('/api/solve-stream', async (req, res) => {
     sendEvent(res, 'agent-start', { name: r.name });
     const t0 = Date.now();
     try {
-      const out = await r.fn(r.input);
+      const out = await r.fn(r.input, r.context);
       const durationMs = Date.now() - t0;
       sendEvent(res, 'agent-done', { name: r.name, output: out.output, metadata: out.metadata || {}, durationMs });
       return { name: r.name, output: out.output, metadata: out.metadata || {}, durationMs };
@@ -190,6 +205,7 @@ app.post('/api/solve', async (req, res) => {
   const history = getHistory(sessionId);
   const input = req.body && req.body.input;
   const preview = req.body && req.body.preview;
+  const requestApiKey = getRequestApiKey(req);
   const attachments = req.body && Array.isArray(req.body.attachments) ? req.body.attachments : [];
   if (attachments.length > MAX_ATTACHMENTS) {
     return res.status(400).json({ error: `too many attachments (max ${MAX_ATTACHMENTS})` });
@@ -204,7 +220,8 @@ app.post('/api/solve', async (req, res) => {
     logger.debug('POST /api/solve received', {
       preview: !!preview,
       hasInput: typeof input === 'string' && input.trim().length > 0,
-      attachments: attachments.length
+      attachments: attachments.length,
+      hasApiKey: !!requestApiKey
     });
   } catch (e) { }
 
@@ -237,7 +254,11 @@ app.post('/api/solve', async (req, res) => {
       { name: 'exampleAgent', mod: exampleAgent },
       { name: 'duckduckgoAgent', mod: duckAgent }
     ];
-    const scored = registered.map(r => ({ name: r.name, score: (typeof r.mod.supports === 'function') ? r.mod.supports(input) : 0, mod: r.mod }));
+    const scored = registered.map(r => ({
+      name: r.name,
+      score: (typeof r.mod.supports === 'function') ? r.mod.supports(input, { apiKey: requestApiKey }) : 0,
+      mod: r.mod
+    }));
   const suitableAll = scored.filter(s => s.score >= 0.6).sort((a,b) => b.score - a.score);
   const suitable = suitableAll;
 
@@ -264,7 +285,8 @@ app.post('/api/solve', async (req, res) => {
       const aStart = Date.now();
       try {
         const prompt = HISTORY_AGENTS.has(r.name) ? buildHistoryPrompt(input, history) : input;
-        const out = await r.fn(prompt);
+        const context = r.name === 'openaiAgent' && requestApiKey ? { apiKey: requestApiKey } : undefined;
+        const out = await r.fn(prompt, context);
         return { name: r.name, output: out.output, durationMs: Date.now() - aStart, metadata: out.metadata || {} };
       } catch (err) {
         return { name: r.name, error: String(err), durationMs: Date.now() - aStart };
@@ -282,7 +304,6 @@ app.post('/api/solve', async (req, res) => {
 // Accept provided resources (files, apiKey) and attempt to run agents if requirements are met
 app.post('/api/provide', async (req, res) => {
   const sessionId = ensureSession(req, res);
-  const history = getHistory(sessionId);
   const { input, attachments, apiKey, needs } = req.body || {};
   if (!input) return res.status(400).json({ error: 'missing input' });
 
@@ -304,39 +325,11 @@ app.post('/api/provide', async (req, res) => {
     return res.json({ ran: true, result: out });
   }
 
-  // If apiKey provided and needs included internet-access, accept and rerun existing agents
-  if (needs && needs.includes('internet-access') && apiKey) {
-    // In this minimal prototype we don't actually use the key, but will re-run the normal selection
-  // persist the provided key in the transient secret store under a well-known key
-  try {
-    secretStore.set('external_api_key', apiKey);
-    console.warn('Persisting provided apiKey to .env.local (plaintext) for development only.');
-  } catch (e) {}
-    // Reuse POST /api/solve logic
-    try {
-      // enumerate and score agents
-      const registered = [
-        { name: 'openaiAgent', mod: openaiAgent },
-        { name: 'exampleAgent', mod: exampleAgent },
-        { name: 'duckduckgoAgent', mod: duckAgent }
-      ];
-      const scored = registered.map(r => ({ name: r.name, score: (typeof r.mod.supports === 'function') ? r.mod.supports(input) : 0, mod: r.mod }));
-      const suitable = scored.filter(s => s.score >= 0.6).sort((a,b) => b.score - a.score);
-      if (suitable.length === 0) return res.json({ ran: false, message: 'Still no suitable agent after providing apiKey' });
-      const runners = suitable.map(s => ({ name: s.name, fn: s.mod.run }));
-      const results = await Promise.all(runners.map(async r => {
-        try {
-          const prompt = HISTORY_AGENTS.has(r.name) ? buildHistoryPrompt(input, history) : input;
-          const out = await r.fn(prompt);
-          return { name: r.name, output: out.output };
-        } catch (e) { return { name: r.name, error: String(e) }; }
-      }));
-      const final = results.map(r => r.output || (`[${r.name} error] ${r.error || 'no output'}`)).join('\n\n');
-      appendHistory(sessionId, { question: input, answer: final, ts: Date.now() });
-      return res.json({ ran: true, result: final, agents: results });
-    } catch (err) {
-      return res.status(500).json({ error: String(err) });
-    }
+  // Security hardening: API keys must be supplied per request and are never persisted.
+  if (apiKey) {
+    return res.status(400).json({
+      error: 'apiKey provisioning is disabled. Send x-openai-api-key directly on /api/solve or /api/solve-stream.'
+    });
   }
 
   return res.json({ ran: false, message: 'No actionable resources provided' });

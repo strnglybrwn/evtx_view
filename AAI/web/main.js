@@ -3,6 +3,8 @@
 document.addEventListener('DOMContentLoaded', () => {
   const input = document.getElementById('input');
   const form = document.getElementById('form');
+  const submitBtn = form ? form.querySelector('button[type="submit"]') : null;
+  const submitBtnText = submitBtn ? submitBtn.textContent : 'Go!';
   const result = document.getElementById('result');
   const pastePreview = document.getElementById('pastePreview');
   const selectionPanel = document.getElementById('selectionPanel');
@@ -13,6 +15,22 @@ document.addEventListener('DOMContentLoaded', () => {
   const MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024; // ~3MB each to stay under server limit
   const MAX_B64_LENGTH = Math.ceil(MAX_ATTACHMENT_BYTES * 4 / 3);
   const attachments = [];
+  let activeEventSource = null;
+  let runInProgress = false;
+  let activeRunId = 0;
+
+  function closeActiveStream(){
+    if (!activeEventSource) return;
+    try { activeEventSource.close(); } catch (e) { console.warn('stream close failed', e); }
+    activeEventSource = null;
+  }
+
+  function setSubmitting(isSubmitting){
+    runInProgress = isSubmitting;
+    if (!submitBtn) return;
+    submitBtn.disabled = isSubmitting;
+    submitBtn.textContent = isSubmitting ? 'Running...' : submitBtnText;
+  }
 
   function setResultText(text){
     if (!result) return;
@@ -126,12 +144,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (form) form.addEventListener('submit', async (e)=>{
     e.preventDefault();
+    if (runInProgress && !activeEventSource) return;
+    const runId = ++activeRunId;
+    closeActiveStream();
+    setSubmitting(true);
+    let releaseSubmitInFinally = true;
     setResultText('Analyzing suitability...');
     try{
       const previewPayload = { input: input.value, preview: true };
       if (attachments.length) previewPayload.attachments = attachments;
       const previewResp = await fetch('/api/solve',{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(previewPayload)});
       const previewBody = await previewResp.json();
+      if (runId !== activeRunId) return;
       if (!previewResp.ok) throw new Error(previewBody.error || JSON.stringify(previewBody));
       showScoredResponse(previewBody);
 
@@ -144,6 +168,7 @@ document.addEventListener('DOMContentLoaded', () => {
           const runPayload = { input: input.value || '', preview: false, attachments };
           const runResp = await fetch('/api/solve', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(runPayload) });
           const runBody = await runResp.json();
+          if (runId !== activeRunId) return;
           if (!runResp.ok) throw new Error(runBody.error || JSON.stringify(runBody));
           // show final result
           if (runBody.result) setResultText(runBody.result);
@@ -161,6 +186,7 @@ document.addEventListener('DOMContentLoaded', () => {
           const runPayload = { input: input.value || '', preview: false, attachments };
           const runResp = await fetch('/api/solve', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(runPayload) });
           const runBody = await runResp.json();
+          if (runId !== activeRunId) return;
           if (!runResp.ok) throw new Error(runBody.error || JSON.stringify(runBody));
           if (runBody.result) setResultText(runBody.result);
           if (runBody.scored) showScoredResponse(runBody);
@@ -173,6 +199,13 @@ document.addEventListener('DOMContentLoaded', () => {
       setResultText('Opening live stream for selected agent...');
       const esUrl = `/api/solve-stream?input=${encodeURIComponent(input.value)}`;
       const es = new EventSource(esUrl);
+      activeEventSource = es;
+      releaseSubmitInFinally = false;
+      const finishStreamingRun = () => {
+        if (runId !== activeRunId) return;
+        closeActiveStream();
+        setSubmitting(false);
+      };
       es.addEventListener('selection',(ev)=>{
         try{
           const d=JSON.parse(ev.data);
@@ -191,10 +224,19 @@ document.addEventListener('DOMContentLoaded', () => {
       es.addEventListener('final',(ev)=>{
         try{ const d=JSON.parse(ev.data); if (d && d.result) setResultText(d.result); }catch(e){ console.error('final parse', e); }
       });
-      es.addEventListener('done',()=>{ try{ es.close(); }catch(e){ console.error('done close', e); } });
+      es.addEventListener('done', finishStreamingRun);
+      es.onerror = () => {
+        setResultText(prev => (prev ? `${prev}\n\n` : '') + '[stream error] Connection interrupted.');
+        finishStreamingRun();
+      };
 
     }catch(err){ setResultText('Error: '+String(err)); }
+    finally {
+      if (releaseSubmitInFinally) setSubmitting(false);
+    }
   });
+
+  window.addEventListener('beforeunload', closeActiveStream);
 
   // initial
   renderPastePreview();

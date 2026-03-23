@@ -1,6 +1,4 @@
 const https = require('https');
-const fs = require('fs');
-const path = require('path');
 
 const REQUEST_TIMEOUT_MS = 10000;
 const RETRY_DELAY_MS = 300;
@@ -9,43 +7,16 @@ function delay(ms) {
   return new Promise(res => setTimeout(res, ms));
 }
 
-function readEnvFile() {
-  try {
-    const p = path.join(__dirname, '..', '.env');
-    if (!fs.existsSync(p)) return {};
-    const txt = fs.readFileSync(p, 'utf8');
-    const out = {};
-    txt.split('\n').forEach(line => {
-      const idx = line.indexOf('=');
-      if (idx > 0) {
-        const k = line.slice(0, idx).trim();
-        const v = line.slice(idx+1).trim();
-        out[k] = v;
-      }
-    });
-    return out;
-  } catch (e) { return {}; }
-}
-
-function findApiKey() {
-  // check many places, do NOT return the key in outputs
-  try {
-    const secretStore = require('../lib/secretStore');
-    const k1 = secretStore.get('OPENAI_API_KEY');
-    if (k1) return k1;
-    const k2 = secretStore.get('external_api_key');
-    if (k2) return k2;
-  } catch (e) {}
+function findApiKey(overrideKey) {
+  // Runtime key can be passed per request; never persisted.
+  if (typeof overrideKey === 'string' && overrideKey.trim()) return overrideKey.trim();
   if (process.env.OPENAI_API_KEY) return process.env.OPENAI_API_KEY;
   if (process.env.OPENAI_KEY) return process.env.OPENAI_KEY;
-  const env = readEnvFile();
-  if (env.OPENAI_API_KEY) return env.OPENAI_API_KEY;
-  if (env.OPENAI_KEY) return env.OPENAI_KEY;
   return null;
 }
 
-async function run(input) {
-  const key = findApiKey();
+async function run(input, context = {}) {
+  const key = findApiKey(context.apiKey);
   if (!key) throw new Error('missing OpenAI API key');
 
   const payload = JSON.stringify({
@@ -97,9 +68,9 @@ async function run(input) {
   }
 }
 
-function supports(input) {
+function supports(input, context = {}) {
   // prefer open-ended queries if key is present
-  const key = findApiKey();
+  const key = findApiKey(context.apiKey);
   if (!key) return 0;
   // heuristics: if input length > 20 or contains question words, it's suitable
   const q = (input || '').toLowerCase();
